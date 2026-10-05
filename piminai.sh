@@ -8,7 +8,7 @@ set -euo pipefail
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 MINAI_PI="$SCRIPT_DIR/pi-minai"
 REGISTRY="${MINAI_MODEL_REGISTRY:-$MINAI_PI/models.json}"
-export MINAI_CLEAN=0
+export MINAI_CLEAN="${MINAI_CLEAN:-0}"
 export MINAI_ROOT="$SCRIPT_DIR"
 export MINAI_PI
 export MINAI_MODEL_REGISTRY="$REGISTRY"
