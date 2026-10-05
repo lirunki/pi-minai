@@ -1,0 +1,15 @@
+{
+  "metadata": {
+    "description": "Researches about a specific topic.",
+    "purpose": "Research for technical documentation authoring",
+    "tags": ["writing", "technical_documents", "research"]
+  },
+  "instances": [
+    {
+      "model_class_regex": ".*",
+      "instructions": "<<./docwrite/research.md>>",
+      "temperature": 0.2,
+      "rank": 1
+    }
+  ]
+}

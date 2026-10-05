@@ -1,0 +1,17 @@
+{
+    "metadata": {
+      "description": "Use for simple, direct questions that need a quick answer with little or no reasoning, calculation, or planning. Examples: definitions, basic facts, short explanations, 'what is X?'', casual questions. Do NOT use if the query asks for step-by-step work, math solving, planning, or document writing.",
+      "purpose": "General assistance",
+      "tags": ["general_assistance", "question_answering", "decomposition"],
+      "reasoning_effort": "medium"
+    },
+    "instances": [
+    {
+      "model_class_regex": ".*",
+      "instructions": "Answer the user request, provide a full and correct answer.\n",
+      "temperature": 0.7,
+      "rank": 0
+    }
+  ]
+}
+

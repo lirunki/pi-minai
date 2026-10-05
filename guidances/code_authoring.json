@@ -1,0 +1,16 @@
+{
+    "metadata": {
+      "description": "Performs a structured analysis of code. The goal is understanding the codebase and posibly explaining it to the user, or answer questions about it.",
+      "purpose": "Code analysis",
+      "tags": ["code_analysis", "understanding"]
+    },
+    "instances": [
+    {
+      "model_class_regex": ".*",
+      "instructions": "<<./code_authoring/p3_instructions.md>>",
+      "instructions_final": "<<./code_authoring/p3_instructions_final.md>>",
+      "temperature": 0.3,
+      "rank": 3
+    }
+  ]
+}

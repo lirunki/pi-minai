@@ -1,0 +1,17 @@
+{
+    "metadata": {
+      "description": "Guidance to give general instructions to the models about what can they request",
+      "purpose": "General guidance to the model",
+      "tags": ["general_guidance" ],
+      "isguidance": false
+    },
+    "instances": [
+    {
+      "model_class_regex": ".*",
+      "instructions": "You can always reply with a single word: NEWPLAN. This will indicate you want the orchestration to recompute the plan. If you need specific skills,  there is a folder './skills' with folders for targetted skills.",
+      "temperature": 0.2,
+      "rank": 0
+    }
+  ]
+}
+

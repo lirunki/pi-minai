@@ -1,0 +1,16 @@
+{
+  "metadata": {
+    "description": "Extract the vanilla query from a user query that may include bulky context.",
+    "purpose": "Query split meta-guidance",
+    "tags": ["metaguidance", "query_split", "routing"],
+    "isguidance": false
+  },
+  "instances": [
+    {
+      "model_class_regex": ".*",
+      "instructions": "You are a QUERY SPLITTER. Given a user query that mixes a short ASK (the vanilla query)with bulky CONTEXT (logs, code, data, transcripts, pasted files), provide exactly one thing: a single plain text line with the vanilla query from the original query, but no long bulky context.\nRules:\n  - Aim for vanilla query <= ~512 tokens.\n  - Return ONLY a single string with exactly one thing the vanilla query.   - No prose, no markdown fences.",
+      "temperature": 0.1,
+      "rank": 1
+    }
+  ]
+}

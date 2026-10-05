@@ -1,0 +1,16 @@
+{
+  "metadata": {
+    "description": "Compress the context to retain only the information that is relevant to the query. The goal is to reduce the size of the context while keeping the core information that would help answer the query.",
+    "purpose": "Context compression meta-guidance",
+    "tags": ["metaguidance", "compression", "context"],
+    "isguidance": false
+  },
+  "instances": [
+    {
+      "model_class_regex": ".*",
+      "instructions": "You are a helpful assistant that compresses a given document in terms of what is relevant to a given query.\nThe goal is to retain the information in the document that is most relevant to the query while removing less relevant details.\nCompress the document as much as possible while still keeping the core information that would help answer the query.\nYour goal is not to answer the query, but to reduce the size of the document.\nIf the document is not relevant at all to the query, you can return an empty string. Always try to compress as much as possible while retaining relevance to the query.",
+      "temperature": 0.1,
+      "rank": 1
+    }
+  ]
+}

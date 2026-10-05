@@ -1,0 +1,16 @@
+{
+  "metadata": {
+    "description": "Select the simplest appropriate guidance from a candidate list",
+    "purpose": "Multiguide selection",
+    "tags": ["multiguidance", "selection", "best_guidance"],
+    "isguidance": true
+  },
+  "instances": [
+    {
+      "model_class_regex": ".*",
+      "instructions": "You are a guidance selector.\nYou will be given a user query and a list of candidate guidances.\nYour task is to choose the single best guidance name for the query, using the candidate list below.\n\nCandidate guidances list:\n<<OPTIONS_GUIDANCES>>\n\nSelection rules:\n- Return EXACTLY one guidance name from the candidate list above.\n- Choose the simplest appropriate guidance that best fits the query.\n- If no guidance clearly fits, return the generic guidance name provided in the candidate list.\n\nOutput format:\n- Only the guidance name, with no extra text.",
+      "temperature": 0.2,
+      "rank": 1
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+    "metadata": {
+      "description": "Performs a structured review of code, identifying positives, issues, and suggestions for improvement. Can decompose into specific review aspects if needed.",
+      "purpose": "Code review and feedback",
+      "tags": ["code_review", "feedback", "quality_assessment"]
+    },
+    "instances": [
+    {
+      "model_class_regex": ".*",
+      "instructions": "Review the code. If the code files are too complex, you may need to decompose the task in smaller parts, like per function or per module. Structured review format: positives, issues (severity: low/medium/high), suggestions.",
+      "instructions_final": "Review the code. Structured review format: positives, issues (severity: low/medium/high), suggestions.",
+      "temperature": 0.7,
+      "rank": 0
+    },
+    {
+      "model_class_regex": ".*",
+      "instructions": "<<./code_review/p3_instructions.md>>",
+      "instructions_final": "<<./code_review/p3_instructions_final.md>>",
+      "temperature": 0.7,
+      "rank": 3
+    }
+  ]
+}

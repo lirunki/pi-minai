@@ -1,0 +1,15 @@
+{
+  "metadata": {
+    "description": "Writes a conclusions of the technical document.",
+    "purpose": "Technical documentation authoring",
+    "tags": ["writing", "technical_documents", "research"]
+  },
+  "instances": [
+    {
+      "model_class_regex": ".*",
+      "instructions": "<<./docwrite/docwrite_conclussions.md>>",
+      "temperature": 0.2,
+      "rank": 1
+    }
+  ]
+}

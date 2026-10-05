@@ -1,0 +1,17 @@
+{
+    "metadata": {
+        "description": "Use for any math, calculus, algebra, or quantitative problem. The user wants you to decompose the problem into small steps, show detailed work, and explain clearly. Prefer tool-based calculations. Especially use when the query mentions integrals, derivatives, limits, etc 'show your work', or 'step by step'.This is the default choice for math problems.",
+        "purpose": "Math problem solving",
+        "tags": ["math", "decomposition", "tool_use", "verification"],
+        "reasoning_effort": "high"
+    },
+    "instances": [
+        {
+            "model_class_regex": ".*",
+            "instructions": "<<./math_problem_solving/p3_instructions.md>>",
+            "instructions_final": "<<./math_problem_solving/p3_instructions_final.md>>",
+            "temperature": 0.2,
+            "rank": 5
+        }
+    ]
+}

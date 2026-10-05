@@ -1,0 +1,17 @@
+{
+  "metadata": {
+    "description": "Use only when the main goal is to write or produce a document (technical documentation, research paper, report, manual, article, etc.). Optimized for structured writing and formatting. Do NOT use for solving math problems, reasoning, or complex calculations.",
+    "purpose": "Technical documentation authoring",
+    "tags": ["writing", "technical_documents", "decomposition", "research"],
+    "reasoning_effort": "medium"
+  },
+  "instances": [
+    {
+      "model_class_regex": ".*",
+      "instructions": "<<./docwrite/p3_instructions.md>>",
+      "instructions_final": "<<./docwrite/p3_instructions_final.md>>",
+      "temperature": 0.2,
+      "rank": 1
+    }
+  ]
+}
