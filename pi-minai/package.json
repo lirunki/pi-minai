@@ -1,0 +1,38 @@
+{
+  "name": "pi-minai",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Composable MINAI extensions and shared contracts for Pi",
+  "files": [
+    "src",
+    "extensions",
+    "README.md",
+    "CONFIGURATION.md",
+    "RELEASE_CHECKLIST.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "pack:check": "npm pack --dry-run --ignore-scripts",
+    "test": "node --test --import tsx tests/contracts.test.ts tests/jev.test.ts tests/guidance.test.ts tests/local-jev.test.ts tests/model.test.ts tests/model-auto.test.ts tests/model-embeddings.test.ts tests/model-host-system-one.test.ts tests/http-auto-registry.test.ts tests/pi-task.test.ts tests/orchestration.test.ts tests/python-tools.test.ts tests/http-protocol.test.ts tests/http-stream.test.ts tests/http-continuation.test.ts tests/http-continuation-parallel.test.ts tests/http-adapters.test.ts tests/http-listener.test.ts tests/http-server.test.ts tests/http-runtime.test.ts tests/pi-sdk-session.test.ts tests/http-execution.test.ts tests/http-extension.test.ts tests/python-host.test.ts tests/llama-serve-host.test.ts tests/file-host-registry.test.ts tests/registry-model-router.test.ts tests/model-execution-router.test.ts tests/local-tool-continuation.test.ts tests/http-local-runtime.test.ts tests/http-auto-runtime.test.ts tests/http-registry-path.test.ts tests/local-host-runtime.test.ts tests/http-runs.test.ts tests/http-models.test.ts tests/http-cancel.test.ts tests/http-metrics.test.ts tests/http-metrics-auth.test.ts tests/http-integration.test.ts tests/model-host-process.test.ts tests/local-ranking-host.test.ts tests/guidance-files.test.ts"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  },
+  "pi": {
+    "extensions": [
+      "./extensions"
+    ]
+  }
+}

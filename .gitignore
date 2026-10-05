@@ -1,0 +1,40 @@
+# Python caches and environments
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.venv/
+venv/
+
+# Node/Pi development
+node_modules/
+dist/
+build/
+.turbo/
+
+# Local secrets and machine-specific files
+.env
+.env.*
+!.env.example
+api_keys.py
+my_endpoints.csv
+cert.pem
+key.pem
+
+# Model/runtime artifacts
+*.gguf
+*.safetensors
+*.bin
+model_context.cache
+runtime/.cache/
+.minai/
+
+# Generated graph/report artifacts
+graphify-out/
+
+# Logs and temporary files
+*.log
+*.tmp
+.DS_Store
