@@ -21,8 +21,8 @@ The package now includes:
 See [`CONFIGURATION.md`](pi-minai/CONFIGURATION.md) for runtime configuration and
 security guidance. The [`RELEASE_CHECKLIST.md`](pi-minai/RELEASE_CHECKLIST.md)
 =======
-See [`CONFIGURATION.md`](minai-pi/CONFIGURATION.md) for runtime configuration and
-security guidance. The [`RELEASE_CHECKLIST.md`](minai-pi/RELEASE_CHECKLIST.md)
+See [`CONFIGURATION.md`](pi-minai/CONFIGURATION.md) for runtime configuration and
+security guidance. The [`RELEASE_CHECKLIST.md`](pi-minai/RELEASE_CHECKLIST.md)
 >>>>>>> 004107b (docs: move the package README to the repository root)
 records Phase 11 validation and public-release follow-up work.
 

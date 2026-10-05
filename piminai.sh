@@ -6,7 +6,7 @@ set -euo pipefail
 # starts the configured llama-server.
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
-MINAI_PI="$SCRIPT_DIR/minai-pi"
+MINAI_PI="$SCRIPT_DIR/pi-minai"
 REGISTRY="${MINAI_MODEL_REGISTRY:-$MINAI_PI/models.json}"
 export MINAI_CLEAN=0
 export MINAI_ROOT="$SCRIPT_DIR"

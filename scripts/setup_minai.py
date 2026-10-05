@@ -2,7 +2,7 @@
 """All-up MINAI setup: local model hosts, remote providers, ranking sidecars.
 
 Merge-only by design: whatever is already in the MINAI model registry
-(minai-pi/models.json) is kept verbatim — this script only fills gaps and
+(pi-minai/models.json) is kept verbatim — this script only fills gaps and
 reports exactly what it adds. Remote provider suggestions come from the Pi
 model catalog (~/.pi/agent/models.json), reusing its credentials via
 apiKeyCatalog so no key is ever copied or stored here.
@@ -12,7 +12,7 @@ Usage:
 
   --yes          accept every suggestion without prompting
   --dry-run      print the plan, write nothing
-  --registry     MINAI model registry path (default: <repo>/minai-pi/models.json)
+  --registry     MINAI model registry path (default: <repo>/pi-minai/models.json)
   --pi-catalog   Pi model catalog path (default: ~/.pi/agent/models.json)
 """
 
@@ -26,7 +26,7 @@ import time
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-DEFAULT_REGISTRY = REPO / "minai-pi" / "models.json"
+DEFAULT_REGISTRY = REPO / "pi-minai" / "models.json"
 DEFAULT_CATALOG = Path.home() / ".pi" / "agent" / "models.json"
 DEFAULT_CACHE = Path.home() / ".cache" / "minai" / "llama"
 LLAMA_BIN = Path.home() / "bin" / "llama-server"
@@ -244,7 +244,7 @@ def main() -> None:
         print("nothing to write")
 
     # best-effort validation with the real parser
-    if (REPO / "minai-pi" / "node_modules").exists():
+    if (REPO / "pi-minai" / "node_modules").exists():
         try:
             script = ("import { parseLocalRankingHostsOptions } from './src/local-ranking-host.js';"
                       "import { readFileSync } from 'node:fs';"
@@ -253,7 +253,7 @@ def main() -> None:
                       "console.log('registry parses cleanly');")
             env = {**os.environ, "MINAI_SETUP_REGISTRY": str(registry_path)}
             result = subprocess.run(["node", "--import", "tsx", "--eval", script],
-                                    cwd=REPO / "minai-pi", capture_output=True, text=True, timeout=120, env=env)
+                                    cwd=REPO / "pi-minai", capture_output=True, text=True, timeout=120, env=env)
             if result.returncode == 0:
                 print(result.stdout.strip())
             else:

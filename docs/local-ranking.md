@@ -1,14 +1,14 @@
-# Local embeddings for minai-pi
+# Local embeddings for pi-minai
 
 MINAI's `model: "auto"` semantic selection ranks candidates by embedding
-similarity. The TS runtime (`minai-pi`) speaks the OpenAI-compatible
-`/v1/embeddings` protocol natively (`minai-pi/src/model-embeddings.ts`); what is
+similarity. The TS runtime (`pi-minai`) speaks the OpenAI-compatible
+`/v1/embeddings` protocol natively (`pi-minai/src/model-embeddings.ts`); what is
 missing on this machine is only a server that *serves* an embedding model.
 
 The MINAI extension can launch and manage a local llama.cpp embedding sidecar
-itself (`minai-pi/src/local-ranking-host.ts`). Configuration lives in the model
+itself (`pi-minai/src/local-ranking-host.ts`). Configuration lives in the model
 registry file, alongside the hosts/models config it belongs with. Add a
-`ranking` section to `minai-pi/models.json`:
+`ranking` section to `pi-minai/models.json`:
 
 ```json
 {
@@ -37,7 +37,7 @@ the cached download. Sidecar start timing: the **embedding** sidecar is lazy —
 it spawns (and downloads) on the first actual embed request from `model:
 "auto"` selection, so `/minai start` stays instant; set `eager: true` on the
 embedding entry to boot it with the runtime. The **reranker** defaults to
-eager because nothing inside minai-pi calls it; set `eager: false` to disable
+eager because nothing inside pi-minai calls it; set `eager: false` to disable
 that. Pin an exact file inside the repo with `hfFile` (passed as
 `--hf-file`), or give an exact quant in the repo string (`:Q8_0`). First-start
 downloads get a generous 10 minute startup timeout by default; override with
@@ -77,5 +77,5 @@ requests; it does not select or download model files.
 
 With only one eligible registry model, `model: "auto"` still shortcuts without
 calling the endpoint. The sidecars bind to `127.0.0.1`; do not expose them on a
-network interface. minai-pi itself never calls the reranker; that endpoint is
+network interface. pi-minai itself never calls the reranker; that endpoint is
 for external clients.

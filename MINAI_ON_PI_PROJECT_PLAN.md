@@ -98,7 +98,7 @@ Start with this because all later extensions communicate through it.
 Recommended package-level structure:
 
 ```text
-packages/minai-pi/
+packages/pi-minai/
 ├── package.json
 ├── src/contracts/
 ├── src/registry/
