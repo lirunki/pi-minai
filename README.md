@@ -88,6 +88,17 @@ Run from the repository root (any working directory works):
 ./piminai.sh
 ```
 
+For a fresh machine, `scripts/setup_minai.sh` is the turnkey one-shot: it
+preflights the tools, creates the model cache, runs `npm install`, verifies
+the guidance catalog, fills the model registry (local hosts/models, remote
+providers, ranking sidecar — merge-only, with backup), seeds the Pi catalog
+providers, and typechecks the checkout. Safe to re-run at any time:
+
+```bash
+scripts/setup_minai.sh            # full turnkey setup
+scripts/setup_minai.sh --dry-run  # preview only
+```
+
 It wires the environment (`MINAI_ROOT`, `MINAI_PI`, `MINAI_MODEL_REGISTRY`, `MINAI_GUIDANCE_ROOT`, ports `8787`/`8788`, llama-server settings), merges the `llama-server` and `pidev` providers into the Pi model catalog (`~/.pi/agent/models.json`) without touching unrelated entries, and starts Pi with all four extensions loaded.
 
 Inside Pi:
