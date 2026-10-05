@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-export type HttpRunState = { model?: string; guidance?: string; thinking?: string; usage?: unknown; currentTask?: string; continuation?: string; output?: string; outputMode?: "text" | "thinking"; phase?: "guidance" | "model" | "planning" | "execution" | "aggregating" | "complete"; progress?: string; actions?: number; plan?: Array<{ id: string; query: string; status: "pending" | "running" | "completed" | "failed"; dependsOn?: string[]; guidance?: string; model?: string; reasoning?: string; error?: string }>; };
+export type HttpRunState = { model?: string; guidance?: string; thinking?: string; usage?: unknown; currentTask?: string; continuation?: string; output?: string; outputMode?: "text" | "thinking"; phase?: "guidance" | "model" | "planning" | "execution" | "aggregating" | "complete"; progress?: string; warnings?: string[]; actions?: number; plan?: Array<{ id: string; query: string; status: "pending" | "running" | "completed" | "failed"; dependsOn?: string[]; guidance?: string; model?: string; reasoning?: string; error?: string }>; };
 export type HttpRun = { id: string; controller: AbortController; startedAt: number; owner?: string; state: HttpRunState; cleanup?: () => void | Promise<void>; };
 
 /** Shared lifecycle registry for Pi and local-host HTTP executions. */

@@ -106,3 +106,21 @@ test("low-confidence or missing JEV uses deterministic ranking", async () => {
 test("empty eligible set has a stable error", async () => {
   await assert.rejects(() => new ModelAutoSelector(catalog).select({ ...base, requestedModel: "auto", requirements: { vision: true, locality: "local" } }), (error: unknown) => error instanceof ModelSelectionError && error.code === "model_no_candidates");
 });
+
+test("selection order ranks by embedding probability for embedding-sourced picks", async () => {
+  const twoModels = new StaticModelCatalog(models.slice(0, 2));
+  const jev = new FakeSystemOneService(async () => { throw new Error("confident embeddings should skip JEV"); });
+  const embeddings = { embed: async () => [[1, 0], [0, 1], [1, 0]] };
+  const result = await new ModelAutoSelector(twoModels, jev, { embeddingService: embeddings, embeddingTemperature: 0.1, embeddingMinConfidence: 0.75 }).select({ ...base, requestedModel: "auto" });
+  assert.deepEqual(result.order, [{ provider: "remote", id: "strong" }, { provider: "local", id: "small" }]);
+});
+
+test("selection order for deterministic fallback follows readiness and quality rank", async () => {
+  const jev = new FakeSystemOneService(async () => { throw new Error("no classifier configured"); });
+  const selector = new ModelAutoSelector(catalog, jev, { embeddingService: { embed: async () => { throw new Error("embedding sidecar down"); } } });
+  const result = await selector.select({ ...base, requestedModel: "auto" });
+  assert.equal(result.source, "fallback");
+  // ready models rank ahead of cold ones, then by quality
+  assert.deepEqual(result.order, [{ provider: "remote", id: "strong" }, { provider: "local", id: "small" }, { provider: "local", id: "cold" }]);
+  assert.deepEqual(result.model, result.order[0]);
+});

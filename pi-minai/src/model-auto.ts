@@ -25,6 +25,8 @@ export type ModelSelection = {
   confidence?: number;
   probabilities?: Record<string, number>;
   candidates: ModelReference[];
+  /** Full preference order: `model` first, then the fallback chain in priority order. */
+  order: ModelReference[];
 };
 
 export type ModelAutoSelectorOptions = {
@@ -45,6 +47,12 @@ export class ModelSelectionError extends MinaiPiError {
 }
 
 function referenceKey(model: ModelReference): string { return `${model.provider}/${model.id}`; }
+
+/** Order candidates by descending probability (stable by reference key on ties). */
+function orderByProbability(candidates: ModelReference[], probabilities: Record<string, number> | undefined): ModelReference[] {
+  if (!probabilities) return candidates;
+  return [...candidates].sort((a, b) => (probabilities[referenceKey(b)] ?? 0) - (probabilities[referenceKey(a)] ?? 0) || referenceKey(a).localeCompare(referenceKey(b)));
+}
 
 function candidateDescription(model: AvailableModel): string {
   const capabilities = Object.entries(model.capabilities).filter(([, enabled]) => enabled).map(([name]) => name).join(", ") || "basic";
@@ -108,12 +116,12 @@ export class ModelAutoSelector implements ModelSelectorService {
     if (requested) {
       const explicit = this.catalog.get(requested);
       const isEligible = explicit !== undefined && eligible.some((model) => referenceKey(model) === referenceKey(requested));
-      if (isEligible && explicit.availability === "ready") return { model: requested, source: "explicit", candidates };
+      if (isEligible && explicit.availability === "ready") return { model: requested, source: "explicit", candidates, order: [requested] };
       if (policy === "strict") throw new ModelSelectionError(`Explicit model ${referenceKey(requested)} is unavailable or does not satisfy requirements`, "model_explicit_invalid");
     }
 
     if (eligible.length === 0) throw new ModelSelectionError("No model satisfies the requested capabilities", "model_no_candidates");
-    if (eligible.length === 1) return { model: candidates[0]!, source: "single", confidence: 1, probabilities: { [referenceKey(candidates[0]!)]: 1 }, candidates };
+    if (eligible.length === 1) return { model: candidates[0]!, source: "single", confidence: 1, probabilities: { [referenceKey(candidates[0]!)]: 1 }, candidates, order: candidates };
 
     let embeddingProbabilities: Record<string, number> | undefined;
     if (this.options.embeddingService) {
@@ -134,7 +142,7 @@ export class ModelAutoSelector implements ModelSelectorService {
         const bestIndex = probabilities.reduce((best, probability, index) => probability > probabilities[best]! ? index : best, 0);
         const confidence = probabilities[bestIndex]!;
         if (confidence >= (this.options.embeddingMinConfidence ?? 0.75)) {
-          return { model: candidates[bestIndex]!, source: "embedding", confidence, probabilities: embeddingProbabilities, candidates };
+          return { model: candidates[bestIndex]!, source: "embedding", confidence, probabilities: embeddingProbabilities, candidates, order: orderByProbability(candidates, embeddingProbabilities) };
         }
       } catch (error) {
         if (signal?.aborted) throw signal.reason ?? error;
@@ -161,14 +169,16 @@ export class ModelAutoSelector implements ModelSelectorService {
         const threshold = input.minConfidence ?? 0.5;
         if (answer.type === "choice" && criteria[answer.choice] !== undefined && answer.confidence >= threshold) {
           const chosen = eligible.find((model) => referenceKey(model) === answer.choice)!;
-          return { model: { provider: chosen.provider, id: chosen.id }, source: "jev", confidence: answer.confidence, probabilities: answer.probabilities, candidates };
+          const chosenRef = { provider: chosen.provider, id: chosen.id };
+          const rest = candidates.filter((candidate) => referenceKey(candidate) !== referenceKey(chosenRef));
+          return { model: chosenRef, source: "jev", confidence: answer.confidence, probabilities: answer.probabilities, candidates, order: [chosenRef, ...orderByProbability(rest, answer.probabilities)] };
         }
       } catch (error) {
         if (error instanceof ServiceUnavailableError) throw error;
       }
     }
 
-    const selected = rank(eligible, input.localityPreference)[0]!;
-    return { model: { provider: selected.provider, id: selected.id }, source: "fallback", candidates };
+    const ranked = rank(eligible, input.localityPreference).map(({ provider, id }) => ({ provider, id }));
+    return { model: ranked[0]!, source: "fallback", candidates, order: ranked };
   }
 }

@@ -11,7 +11,8 @@ import type { PlanStep, PlanStepView, ReasoningLevel } from "./planning.js";
 
 function invocation(request: NormalizedChatRequest, model: ModelReference): ModelInvocation { return { model, messages: request.messages.map(({ role, content }) => ({ role, content })), ...(request.tools === undefined ? {} : { tools: request.tools }), ...(request.temperature === undefined ? {} : { temperature: request.temperature }), ...(request.maxOutputTokens === undefined ? {} : { maxOutputTokens: request.maxOutputTokens }), ...(request.thinking?.effort === "none" || request.thinking?.think === false ? { thinking: "off" as const } : request.thinking?.think && typeof request.thinking.think === "string" ? { thinking: request.thinking.think } : request.thinking?.effort ? { thinking: request.thinking.effort } : {}) }; }
 
-export type PlanningProgress = { requestId?: string; phase: "guidance" | "model" | "planning" | "plan_ready" | "planning_failed" | "step_start" | "step_done" | "step_failed" | "aggregating"; message: string; steps?: PlanStepView[]; stepIndex?: number; model?: string; guidance?: string };
+export type PlanningProgress = { requestId?: string; phase: "guidance" | "model" | "model_fallback" | "planning" | "plan_ready" | "planning_failed" | "step_start" | "step_done" | "step_failed" | "aggregating"; message: string; steps?: PlanStepView[]; stepIndex?: number; model?: string; guidance?: string };
+export type SelectedModel = { model: ModelReference; order: ModelReference[]; source: string };
 export type ModelExecutionRouterOptions = { classifierModel?: string; classifierMinConfidence?: number; requirements?: ModelRequirement; planning?: boolean; board?: PlanBoard; onProgress?: (progress: PlanningProgress) => void };
 
 type StepResult = { step: PlanStep; result: string };
@@ -35,13 +36,14 @@ export class ModelExecutionRouter implements HttpExecutionServices {
   readonly continuation: LocalToolContinuationManager;
   readonly board: PlanBoard;
   listModels(): AvailableModel[] { return this.models.candidates().map((reference) => this.models.model(reference)).filter((model): model is AvailableModel => model !== undefined); }
-  constructor(private readonly models: RegistryModelRouter, private readonly options: ModelExecutionRouterOptions = {}) { this.board = options.board ?? new PlanBoard(); this.continuation = new LocalToolContinuationManager((reference) => models.host(reference), 60_000, async (request) => this.selectedModel(request)); }
-  private async selectedModel(request: NormalizedChatRequest, signal?: AbortSignal): Promise<ModelReference> {
+  constructor(private readonly models: RegistryModelRouter, private readonly options: ModelExecutionRouterOptions = {}) { this.board = options.board ?? new PlanBoard(); this.continuation = new LocalToolContinuationManager((reference) => models.host(reference), 60_000, async (request) => (await this.selectedModel(request)).model); }
+  private static refKey(model: ModelReference): string { return `${model.provider}/${model.id}`; }
+  private async selectedModel(request: NormalizedChatRequest, signal?: AbortSignal): Promise<SelectedModel> {
     this.options.onProgress?.({ requestId: request.requestId, phase: "guidance", message: "guidance selection: evaluating request", guidance: "plan_query" });
     const minaiAlias = request.model.provider === "minai" || (request.model.provider === "default" && request.model.id === "minai");
     if (!minaiAlias && request.model.id !== "auto" && request.model.provider !== "default") {
       this.options.onProgress?.({ requestId: request.requestId, phase: "model", message: `model selection: explicit ${request.model.provider}/${request.model.id}`, model: `${request.model.provider}/${request.model.id}` });
-      return request.model;
+      return { model: request.model, order: [request.model], source: "explicit" };
     }
     const requirements = this.options.requirements ?? {
       ...(request.tools?.length ? { tools: true } : {}),
@@ -56,7 +58,55 @@ export class ModelExecutionRouter implements HttpExecutionServices {
       requirements,
     }, signal);
     this.options.onProgress?.({ requestId: request.requestId, phase: "model", message: `model selection: auto chose ${selected.model.provider}/${selected.model.id} (${selected.source})`, model: `${selected.model.provider}/${selected.model.id}` });
-    return selected.model;
+    const order = selected.order ?? [selected.model, ...selected.candidates.filter((candidate) => `${candidate.provider}/${candidate.id}` !== `${selected.model.provider}/${selected.model.id}`)];
+    return { model: selected.model, order, source: selected.source };
+  }
+
+  /** Emit a visible warning and record the fallback attempt. */
+  private warnFallback(request: NormalizedChatRequest, failed: ModelReference, error: unknown, next: ModelReference | undefined): void {
+    const message = error instanceof Error ? error.message : String(error);
+    this.options.onProgress?.({ requestId: request.requestId, phase: "model_fallback", message: `model selection: ${ModelExecutionRouter.refKey(failed)} unreachable (${message})${next ? ` — falling back to ${ModelExecutionRouter.refKey(next)}` : " — no fallback models left"}`, model: next ? `${next.provider}/${next.id}` : undefined });
+  }
+
+  /** Invoke the first reachable model in `order`, warning (via onProgress) and falling back on each failure. */
+  private async invokeWithFallback(request: NormalizedChatRequest, order: ModelReference[], call: Omit<ModelInvocation, "model">, signal?: AbortSignal): Promise<{ model: ModelReference; response: { text: string; finishReason?: "stop" | "length" | "tool_call" | "error"; usage?: { inputTokens?: number; outputTokens?: number } } }> {
+    let lastError: unknown;
+    for (const [index, model] of order.entries()) {
+      try {
+        return { model, response: await this.models.host(model).invoke({ ...call, model }, signal) };
+      } catch (error) {
+        if (signal?.aborted) throw error;
+        lastError = error;
+        const next = order[index + 1];
+        if (order.length > 1) this.warnFallback(request, model, error, next);
+        if (!next) break;
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error(`all candidate models failed (${order.map(ModelExecutionRouter.refKey).join(", ")})`);
+  }
+
+  /** Stream from the first reachable model in `order`; falls back only before any content was produced. */
+  private async *streamWithFallback(request: NormalizedChatRequest, order: ModelReference[], call: Omit<ModelInvocation, "model">, signal?: AbortSignal): AsyncGenerator<NormalizedChatStreamEvent> {
+    let lastError: unknown;
+    for (const [index, model] of order.entries()) {
+      let produced = false;
+      let text = "";
+      try {
+        for await (const event of this.models.host(model).stream({ ...call, model }, signal)) {
+          if (event.type === "thinking_delta") yield { type: "thinking_delta", requestId: request.requestId, model, delta: event.text };
+          else if (event.type === "delta") { produced = true; text += event.text; yield { type: "text_delta", requestId: request.requestId, model, delta: event.text }; }
+          else if (event.type === "tool_call") continue;
+          else { produced = true; yield { type: "done", result: { requestId: request.requestId, model, text, finishReason: event.result.finishReason === "tool_call" ? "tool_calls" : event.result.finishReason ?? "stop", ...(event.result.usage === undefined ? {} : { usage: { promptTokens: event.result.usage.inputTokens, completionTokens: event.result.usage.outputTokens } }) } }; }
+        }
+        return;
+      } catch (error) {
+        if (signal?.aborted || produced) throw error;
+        lastError = error;
+        const next = order[index + 1];
+        if (order.length > 1) this.warnFallback(request, model, error, next);
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error(`all candidate models failed (${order.map(ModelExecutionRouter.refKey).join(", ")})`);
   }
 
   private resolveModelRef(spec: string, fallback: ModelReference): ModelReference {
@@ -67,10 +117,10 @@ export class ModelExecutionRouter implements HttpExecutionServices {
   }
 
   /** Ask the planning guidance for a structured plan and install it on the board. */
-  private async planBoard(request: NormalizedChatRequest, model: ModelReference, signal?: AbortSignal): Promise<boolean> {
+  private async planBoard(request: NormalizedChatRequest, order: ModelReference[], signal?: AbortSignal): Promise<boolean> {
     if (!this.options.planning) return false;
-    this.options.onProgress?.({ requestId: request.requestId, phase: "planning", message: "planning guidance: requesting structured plan", guidance: "plan_query", model: `${model.provider}/${model.id}` });
-    const planner = await this.models.host(model).invoke({ model, messages: [{ role: "user", content: [
+    this.options.onProgress?.({ requestId: request.requestId, phase: "planning", message: "planning guidance: requesting structured plan", guidance: "plan_query", model: `${order[0]!.provider}/${order[0]!.id}` });
+    const { response: planner } = await this.invokeWithFallback(request, order, { messages: [{ role: "user", content: [
       "You are the planning guidance. Decide whether the user request needs a multi-step plan, then return exactly one JSON object and nothing else.",
       "",
       "Decompose (return subtasks) when the request has ANY of:",
@@ -146,7 +196,7 @@ export class ModelExecutionRouter implements HttpExecutionServices {
     return [...history.map(({ role, content }) => ({ role, content })), { role: "user", content: `${body}Using the subtask results above, produce the final answer to this request:\n${last.content}` }];
   }
 
-  private async *runBoardEvents(request: NormalizedChatRequest, fallbackModel: ModelReference, signal?: AbortSignal): AsyncGenerator<{ kind: "progress"; event: PlanningProgress } | { kind: "result"; results: StepResult[] }> {
+  private async *runBoardEvents(request: NormalizedChatRequest, order: ModelReference[], signal?: AbortSignal): AsyncGenerator<{ kind: "progress"; event: PlanningProgress } | { kind: "result"; results: StepResult[] }> {
     const results: StepResult[] = [];
     for (;;) {
       const ready = this.board.readySteps();
@@ -155,10 +205,10 @@ export class ModelExecutionRouter implements HttpExecutionServices {
         this.board.markRunning(step.id);
         this.options.onProgress?.({ requestId: request.requestId, phase: "step_start", steps: stepViews(this.board), message: `plan step ${step.id}: ${step.query}` });
         yield { kind: "progress", event: { requestId: request.requestId, phase: "step_start", steps: stepViews(this.board), message: `plan step ${step.id}: ${step.query}` } };
-        const model = step.model ? this.resolveModelRef(step.model, fallbackModel) : fallbackModel;
+        const stepOrder = step.model ? [this.resolveModelRef(step.model, order[0]!)] : order;
         const passalong = results.filter((entry) => step.dependsOn.includes(entry.step.id));
         try {
-          const response = await this.models.host(model).invoke({ model, messages: this.stepMessages(step, passalong), thinking: planThinking(step.reasoning) }, signal);
+          const { response } = await this.invokeWithFallback(request, stepOrder, { messages: this.stepMessages(step, passalong), thinking: planThinking(step.reasoning) }, signal);
           results.push({ step: { ...step }, result: response.text });
           this.board.markCompleted(step.id, response.text);
           const event: PlanningProgress = { requestId: request.requestId, phase: "step_done", steps: stepViews(this.board), message: `plan step ${step.id} completed` };
@@ -176,39 +226,41 @@ export class ModelExecutionRouter implements HttpExecutionServices {
     yield { kind: "result", results };
   }
 
-  private async runBoard(request: NormalizedChatRequest, fallbackModel: ModelReference, signal?: AbortSignal): Promise<StepResult[]> {
-    for await (const item of this.runBoardEvents(request, fallbackModel, signal)) if (item.kind === "result") return item.results;
+  private async runBoard(request: NormalizedChatRequest, order: ModelReference[], signal?: AbortSignal): Promise<StepResult[]> {
+    for await (const item of this.runBoardEvents(request, order, signal)) if (item.kind === "result") return item.results;
     return [];
   }
 
   private finishResult(request: NormalizedChatRequest, model: ModelReference, result: { text: string; finishReason?: "stop" | "length" | "tool_call" | "error"; usage?: { inputTokens?: number; outputTokens?: number } }): NormalizedChatResult { const usage = result.usage; return { requestId: request.requestId, model, text: result.text, finishReason: result.finishReason === "tool_call" ? "tool_calls" : result.finishReason ?? "stop", ...(usage === undefined || (usage.inputTokens === undefined && usage.outputTokens === undefined) ? {} : { usage: { promptTokens: usage.inputTokens ?? 0, completionTokens: usage.outputTokens ?? 0 } }), ...(request.thinking === undefined ? {} : { effectiveThinking: request.thinking.effort === "none" || request.thinking.think === false ? "off" : request.thinking.effort ?? (typeof request.thinking.think === "string" ? request.thinking.think : undefined) }) }; }
 
   async complete(request: NormalizedChatRequest, signal?: AbortSignal): Promise<NormalizedChatResult> {
-    const model = await this.selectedModel(request, signal);
-    const planned = await this.planBoard(request, model, signal);
-    if (!planned) return this.finishResult(request, model, await this.models.host(model).invoke(invocation(request, model), signal));
-    const results = await this.runBoard(request, model, signal);
+    const { model, order } = await this.selectedModel(request, signal);
+    const planned = await this.planBoard(request, order, signal);
+    if (!planned) {
+      const { model: used, response } = await this.invokeWithFallback(request, order, invocation(request, order[0]!), signal);
+      return this.finishResult(request, used, response);
+    }
+    const results = await this.runBoard(request, order, signal);
     this.board.startAggregation();
     const completed = results.length;
     const total = this.board.stats().total;
     this.options.onProgress?.({ requestId: request.requestId, phase: "aggregating", steps: stepViews(this.board), message: completed ? `aggregating ${completed}/${total} plan step results` : "aggregating: no plan steps succeeded; answering directly" });
-    const aggregated = await this.models.host(model).invoke({ model, messages: this.aggregateMessages(request, results), thinking: "off" }, signal);
+    const { model: used, response: aggregated } = await this.invokeWithFallback(request, order, { messages: this.aggregateMessages(request, results), thinking: "off" }, signal);
     this.board.completeAggregation(aggregated.text);
     this.options.onProgress?.({ requestId: request.requestId, phase: "plan_ready", steps: stepViews(this.board), message: "aggregation complete" });
-    return this.finishResult(request, model, aggregated);
+    return this.finishResult(request, used, aggregated);
   }
 
   async *stream(request: NormalizedChatRequest, signal?: AbortSignal): AsyncIterable<NormalizedChatStreamEvent> {
-    const model = await this.selectedModel(request, signal);
-    const planned = await this.planBoard(request, model, signal);
+    const { model, order } = await this.selectedModel(request, signal);
+    const planned = await this.planBoard(request, order, signal);
     if (!planned) {
-      let text = "";
-      for await (const event of this.models.host(model).stream(invocation(request, model), signal)) { if (event.type === "delta") { text += event.text; yield { type: "text_delta", requestId: request.requestId, model, delta: event.text }; } else if (event.type === "thinking_delta") yield { type: "thinking_delta", requestId: request.requestId, model, delta: event.text }; else if (event.type === "tool_call") continue; else yield { type: "done", result: { requestId: request.requestId, model, text, finishReason: event.result.finishReason === "tool_call" ? "tool_calls" : event.result.finishReason ?? "stop", ...(event.result.usage === undefined ? {} : { usage: { promptTokens: event.result.usage.inputTokens, completionTokens: event.result.usage.outputTokens } }) } }; }
+      yield* this.streamWithFallback(request, order, invocation(request, order[0]!), signal);
       return;
     }
     yield { type: "thinking_delta", requestId: request.requestId, model, delta: `[plan] executing ${this.board.stats().total}-step plan\n` };
     const results: StepResult[] = [];
-    for await (const item of this.runBoardEvents(request, model, signal)) {
+    for await (const item of this.runBoardEvents(request, order, signal)) {
       if (item.kind === "result") { results.push(...item.results); continue; }
       const event = item.event;
       if (event.phase === "step_start") yield { type: "thinking_delta", requestId: request.requestId, model, delta: `[plan step ${event.message.slice("plan step ".length)}] started\n` };
@@ -221,8 +273,6 @@ export class ModelExecutionRouter implements HttpExecutionServices {
     const completed = results.length;
     const total = this.board.stats().total;
     this.options.onProgress?.({ requestId: request.requestId, phase: "aggregating", steps: stepViews(this.board), message: completed ? `aggregating ${completed}/${total} plan step results` : "aggregating: no plan steps succeeded; answering directly" });
-    let text = "";
-    for await (const event of this.models.host(model).stream({ model, messages: this.aggregateMessages(request, results), thinking: "off" }, signal)) { if (event.type === "delta") { text += event.text; yield { type: "text_delta", requestId: request.requestId, model, delta: event.text }; } else if (event.type === "thinking_delta") yield { type: "thinking_delta", requestId: request.requestId, model, delta: event.text }; else if (event.type === "tool_call") continue; else yield { type: "done", result: { requestId: request.requestId, model, text, finishReason: event.result.finishReason === "tool_call" ? "tool_calls" : event.result.finishReason ?? "stop", ...(event.result.usage === undefined ? {} : { usage: { promptTokens: event.result.usage.inputTokens, completionTokens: event.result.usage.outputTokens } }) } }; }
-    this.board.completeAggregation(text);
+    for await (const event of this.streamWithFallback(request, order, { messages: this.aggregateMessages(request, results), thinking: "off" }, signal)) { if (event.type === "done") { this.board.completeAggregation(event.result.text); } yield event; }
   }
 }

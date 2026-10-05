@@ -49,7 +49,7 @@ export class HttpExtensionRuntime {
         ...(this.options.embeddingTemperature === undefined ? {} : { embeddingTemperature: this.options.embeddingTemperature }),
       };
       const modelRouter = new FileRegistryModelRouter(registry, systemOne, this.localHosts, selectorOptions);
-      this.services = new ModelExecutionRouter(modelRouter, { classifierModel, classifierMinConfidence: this.options.classifierMinConfidence, planning: this.options.planning, board: planningBoard(), onProgress: (progress) => { if (progress.requestId) this.runs.update(progress.requestId, { phase: progress.phase === "planning_failed" || progress.phase === "plan_ready" ? "planning" : progress.phase === "aggregating" ? "aggregating" : progress.phase === "step_start" || progress.phase === "step_done" || progress.phase === "step_failed" ? "execution" : progress.phase === "model" ? "model" : progress.phase === "guidance" ? "guidance" : "planning", progress: progress.message, ...(progress.model ? { model: progress.model } : {}), ...(progress.guidance ? { guidance: progress.guidance } : {}), ...(progress.steps ? { plan: progress.steps } : {}) }); if (progress.phase === "plan_ready" || progress.phase === "step_start" || progress.phase === "step_done" || progress.phase === "step_failed" || progress.phase === "aggregating") notifyPlanChanged(); } });
+      this.services = new ModelExecutionRouter(modelRouter, { classifierModel, classifierMinConfidence: this.options.classifierMinConfidence, planning: this.options.planning, board: planningBoard(), onProgress: (progress) => { if (progress.requestId) this.runs.update(progress.requestId, { phase: progress.phase === "planning_failed" || progress.phase === "plan_ready" ? "planning" : progress.phase === "aggregating" ? "aggregating" : progress.phase === "step_start" || progress.phase === "step_done" || progress.phase === "step_failed" ? "execution" : progress.phase === "model" || progress.phase === "model_fallback" ? "model" : progress.phase === "guidance" ? "guidance" : "planning", progress: progress.message, ...(progress.model ? { model: progress.model } : {}), ...(progress.guidance ? { guidance: progress.guidance } : {}), ...(progress.steps ? { plan: progress.steps } : {}), ...(progress.phase === "model_fallback" && progress.requestId ? { warnings: [...(this.runs.get(progress.requestId)?.state.warnings ?? []), progress.message] } : {}) }); if (progress.phase === "plan_ready" || progress.phase === "step_start" || progress.phase === "step_done" || progress.phase === "step_failed" || progress.phase === "aggregating") notifyPlanChanged(); } });
     }
     if (!this.services) throw new Error("HTTP execution services are not configured");
     await this.options.rankingHosts?.start();
@@ -161,6 +161,7 @@ export default function httpExtension(pi: ExtensionAPI): void {
     const guidance = run.guidance ? ` guide=${run.guidance}` : " guide=auto";
     const progress = run.progress ?? run.currentTask ?? "working";
     const output = run.output ? ` out=${run.output.replace(/\\s+/g, " ").slice(-100)}` : "";
+    const warnings = run.warnings?.length ? ` \u26a0${run.warnings.length}` : "";
     // Plan tree reuses the planning-extension widget structure (todo icon
     // convention), colored with ANSI like the TUI theme: green completed,
     // yellow in-flight/aggregating, red failed, dim pending.
@@ -185,7 +186,7 @@ export default function httpExtension(pi: ExtensionAPI): void {
       return ` ${c(mark.color, mark.glyph)} ${title.slice(0, 96)}${suffix}`;
     });
     const aggregating = run.phase === "aggregating" ? [c("33", " ⇒ aggregating")] : [];
-    return [`${dim(run.id.slice(0, 8))} ${dim(age)} ${phaseTag} ${model}${guidance}${summary} · ${progress}${output}`, ...tree, ...aggregating].join("\n");
+    return [`${dim(run.id.slice(0, 8))} ${dim(age)} ${phaseTag} ${model}${guidance}${summary} · ${progress}${output}${warnings}`, ...tree, ...aggregating].join("\n");
   });
   const start = async (kind: "pidev" | "minai", ctx: ExtensionCommandContext): Promise<void> => {
     const isPi = kind === "pidev";
