@@ -42,6 +42,17 @@ export class ExternalToolContinuationManager {
     if (!request.stream) throw new ContinuationError("Continuation adapter requires streaming", "continuation_invalid");
     if (!request.tools?.length) throw new ContinuationError("At least one external tool is required", "continuation_invalid");
     if (signal?.aborted) throw new ContinuationError("Request was aborted", "continuation_run");
+    const seen = new Set<string>();
+    for (const tool of request.tools) {
+      if (seen.has(tool.name)) throw new ContinuationError(`Duplicate caller tool name: ${tool.name}`, "continuation_invalid");
+      seen.add(tool.name);
+    }
+    // Caller tools are namespaced inside the session (caller_<name>) so they can
+    // never shadow the session's built-in tools (read, bash, edit, ...) — the SDK
+    // merges tools by name with last-write-wins semantics. The wire protocol keeps
+    // the caller's original names: pause events expose them and resume matches by
+    // continuation id, so the renaming is invisible to the caller.
+    const internalToolName = (name: string): string => `caller_${name}`;
     const runId = id();
     let run!: Run;
     const push = (item: QueueItem): void => { const waiter = run.waiters.shift(); if (waiter) waiter(item); else if (run.queue.length < 256) run.queue.push(item); };
@@ -55,12 +66,12 @@ export class ExternalToolContinuationManager {
         if (calls.length > 0) push({ type: "tool_pause_batch", requestId: request.requestId, model: request.model, calls: calls.map((item) => ({ continuationId: item.continuationId, toolCallId: item.toolCallId, name: item.name, arguments: item.arguments })) });
       });
     };
-    const tools: ExternalToolMap = Object.fromEntries(request.tools.map((tool) => [tool.name, async (call: ExternalToolCall) => {
+    const tools: ExternalToolMap = Object.fromEntries(request.tools.map((tool) => [internalToolName(tool.name), async (call: ExternalToolCall) => {
       const continuationId = id();
       let resolve!: (value: unknown) => void;
       let reject!: (reason?: unknown) => void;
       const result = new Promise<unknown>((res, rej) => { resolve = res; reject = rej; });
-      const pending: Pending = { continuationId, runId, toolCallId: call.toolCallId, name: call.name, arguments: call.arguments, resolve, reject, consumed: false, announced: false, timer: undefined as unknown as ReturnType<typeof setTimeout> };
+      const pending: Pending = { continuationId, runId, toolCallId: call.toolCallId, name: tool.name, arguments: call.arguments, resolve, reject, consumed: false, announced: false, timer: undefined as unknown as ReturnType<typeof setTimeout> };
       pending.timer = setTimeout(() => {
         if (pending.consumed) return;
         pending.consumed = true;
@@ -76,7 +87,7 @@ export class ExternalToolContinuationManager {
       scheduleBatch();
       return result;
     }]));
-    const session = await this.createSession({ model: request.model, tools: request.tools, externalTools: tools, signal });
+    const session = await this.createSession({ model: request.model, tools: request.tools.map((tool) => ({ ...tool, name: internalToolName(tool.name) })), externalTools: tools, signal });
     run = { runId, request, session, queue: [], waiters: [], pending: new Map(), text: "", unsubscribe: () => {}, aborted: false, completed: false, pauseScheduled: false };
     this.runs.set(runId, run);
     run.unsubscribe = session.subscribe((event) => {

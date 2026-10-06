@@ -11,7 +11,7 @@ class ToolSession implements PiSessionLike {
   subscribe(listener: (event: { type: string; [key: string]: unknown }) => void): () => void { this.listener = listener; return () => { this.listener = undefined; }; }
   async prompt(): Promise<void> {
     this.listener?.({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "before" } });
-    const toolResult = await this.tools.external({ toolCallId: "call-1", name: "external", arguments: { x: 1 } });
+    const toolResult = await Object.values(this.tools)[0]!({ toolCallId: "call-1", name: "external", arguments: { x: 1 } });
     this.listener?.({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: `:${String((toolResult as { value: string }).value)}` } });
     this.listener?.({ type: "message_end", usage: { input: 5, output: 3, total: 8 } });
   }
@@ -35,7 +35,10 @@ test("pauses on an external fake tool and resumes the same Pi session", async ()
   const pause = await first.next();
   assert.equal(pause.value?.type, "tool_pause_batch");
   if (pause.value?.type !== "tool_pause_batch") return;
-  assert.deepEqual(receivedTools, request.tools);
+  // The session sees the namespaced tool (caller_external) so it can never shadow a built-in.
+  assert.deepEqual(receivedTools, [{ name: "caller_external", parameters: {} }]);
+  // ...but the wire pause event keeps the caller's original tool name.
+  assert.equal(pause.value.calls[0]!.name, "external");
   assert.deepEqual(manager.matchPending([pause.value.calls[0]!.continuationId, "call-1"]), { [pause.value.calls[0]!.continuationId]: pause.value.calls[0]!.continuationId });
   const resumed = manager.resume(pause.value.calls[0]!.continuationId, { value: "done" });
   const events = [];
@@ -77,13 +80,13 @@ test("nudges the session once when the model ends its turn without a tool call o
       this.listener?.({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "called" } });
       await this.toolsExternal({ toolCallId: "call-1", name: "external", arguments: {} });
     }
-    toolsExternal = async (call: { toolCallId: string; name: string; arguments: unknown }) => { await this.external!(call); };
-    external?: (call: { toolCallId: string; name: string; arguments: unknown }) => Promise<unknown>;
+    toolsExternal = async (call: { toolCallId: string; name: string; arguments: unknown }) => { await Object.values(this.externalMap)[0]!(call); };
+    externalMap: Record<string, (call: { toolCallId: string; name: string; arguments: unknown }) => Promise<unknown>> = {};
     async abort(): Promise<void> {}
     dispose(): void {}
   }
   const session = new ShySession();
-  const manager = new ExternalToolContinuationManager(async ({ externalTools }) => { session.external = externalTools.external; return session; });
+  const manager = new ExternalToolContinuationManager(async ({ externalTools }) => { session.externalMap = externalTools; return session; });
   const stream = manager.start(request);
   const events: Array<{ type: string } & Record<string, unknown>> = [];
   for await (const event of stream) { events.push(event as { type: string } & Record<string, unknown>); if (event.type === "tool_pause_batch") break; }
@@ -114,4 +117,35 @@ test("gives up after one nudge and reports the empty result instead of looping",
   const done = events.find((event) => event.type === "done");
   assert.ok(done, "stream still completes");
   assert.equal(done!.result!.text, "");
+});
+
+test("caller tool names are namespaced in the session and can never shadow built-ins", async () => {
+  let receivedDefinitions: Array<{ name: string }> | undefined;
+  let handlerKeys: string[] = [];
+  let wiredName = "";
+  const manager = new ExternalToolContinuationManager(async ({ tools, externalTools }) => {
+    receivedDefinitions = tools.map((tool) => ({ name: tool.name }));
+    handlerKeys = Object.keys(externalTools);
+    return {
+      subscribe(listener: (event: { type: string; [key: string]: unknown }) => void): () => void { listener({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "x" } }); return () => {}; },
+      async prompt(): Promise<void> { wiredName = handlerKeys[0]!; },
+      async abort(): Promise<void> {}, dispose(): void {},
+    } as unknown as PiSessionLike;
+  });
+  // "read" is one of Pi's built-in tool names — the caller must not be able to shadow it.
+  const request2 = { ...request, tools: [{ name: "read", parameters: {} }, { name: "get_location", parameters: {} }] };
+  const stream = manager.start(request2);
+  const events: Array<{ type: string } & Record<string, unknown>> = [];
+  try { for await (const event of stream) events.push(event as { type: string } & Record<string, unknown>); } catch { /* session never calls tools here */ }
+  assert.deepEqual(receivedDefinitions!.map((tool) => tool.name), ["caller_read", "caller_get_location"]);
+  assert.deepEqual(handlerKeys, ["caller_read", "caller_get_location"]);
+  assert.equal(wiredName, "caller_read");
+  // the pending/wire name stays the caller's original (no pause fired here since the fake session never calls)
+  assert.ok(events.every((event) => event.type !== "tool_pause_batch"));
+});
+
+test("duplicate caller tool names are rejected", async () => {
+  const manager = new ExternalToolContinuationManager(async ({ tools }) => ({ subscribe: () => () => {}, prompt: async () => {}, abort: async () => {}, dispose() {} }) as unknown as PiSessionLike);
+  const request2 = { ...request, tools: [{ name: "dup", parameters: {} }, { name: "dup", parameters: {} }] };
+  await assert.rejects(async () => { for await (const _event of manager.start(request2)) {} }, (error: unknown) => error instanceof ContinuationError && error.code === "continuation_invalid" && error.message.includes("Duplicate caller tool name"));
 });

@@ -9,9 +9,10 @@ class ParallelSession implements PiSessionLike {
   constructor(private readonly tools: Record<string, (call: { toolCallId: string; name: string; arguments: unknown }) => Promise<unknown>>) {}
   subscribe(listener: (event: { type: string; [key: string]: unknown }) => void): () => void { this.listener = listener; return () => { this.listener = undefined; }; }
   async prompt(): Promise<void> {
+    const handlers = Object.values(this.tools);
     const values = await Promise.all([
-      this.tools.first({ toolCallId: "call-a", name: "first", arguments: { n: 1 } }),
-      this.tools.second({ toolCallId: "call-b", name: "second", arguments: { n: 2 } }),
+      handlers[0]!({ toolCallId: "call-a", name: "first", arguments: { n: 1 } }),
+      handlers[1]!({ toolCallId: "call-b", name: "second", arguments: { n: 2 } }),
     ]);
     this.listener?.({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: values.map((value) => (value as { value: string }).value).join(",") } });
   }
