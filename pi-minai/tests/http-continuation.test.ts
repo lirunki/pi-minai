@@ -59,3 +59,59 @@ test("expires an unconsumed continuation and rejects resume", async () => {
   await assert.rejects(async () => { for await (const _event of manager.resume(pause.value.calls[0]!.continuationId, {})) {} }, (error: unknown) => error instanceof ContinuationError && (error.code === "continuation_invalid" || error.code === "continuation_expired"));
   await first.return?.(undefined);
 });
+
+test("nudges the session once when the model ends its turn without a tool call or answer", async () => {
+  const prompts: string[] = [];
+  class ShySession implements PiSessionLike {
+    private listener?: (event: { type: string; [key: string]: unknown }) => void;
+    nudged = false;
+    subscribe(listener: (event: { type: string; [key: string]: unknown }) => void): () => void { this.listener = listener; return () => { this.listener = undefined; }; }
+    async prompt(message?: string): Promise<void> {
+      prompts.push(message ?? "initial");
+      if (message === undefined || !message.includes("ended without")) {
+        // Degenerate turn: reasoning only, no tool call, no text.
+        this.listener?.({ type: "message_update", assistantMessageEvent: { type: "thinking_delta", delta: "I'll use the tool." } });
+        return;
+      }
+      this.nudged = true;
+      this.listener?.({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "called" } });
+      await this.toolsExternal({ toolCallId: "call-1", name: "external", arguments: {} });
+    }
+    toolsExternal = async (call: { toolCallId: string; name: string; arguments: unknown }) => { await this.external!(call); };
+    external?: (call: { toolCallId: string; name: string; arguments: unknown }) => Promise<unknown>;
+    async abort(): Promise<void> {}
+    dispose(): void {}
+  }
+  const session = new ShySession();
+  const manager = new ExternalToolContinuationManager(async ({ externalTools }) => { session.external = externalTools.external; return session; });
+  const stream = manager.start(request);
+  const events: Array<{ type: string } & Record<string, unknown>> = [];
+  for await (const event of stream) { events.push(event as { type: string } & Record<string, unknown>); if (event.type === "tool_pause_batch") break; }
+  assert.equal(session.nudged, true, "the session should have been re-prompted with the nudge");
+  assert.equal(prompts.length, 2, "exactly one nudge re-prompt");
+  assert.match(prompts[1]!, /ended without calling a tool/);
+  const pause = events.find((event) => event.type === "tool_pause_batch") as { calls: Array<{ continuationId: string }> } | undefined;
+  assert.ok(pause, "a tool pause must be emitted after the nudge");
+  const resumed = manager.resume(pause!.calls[0]!.continuationId, "result");
+  const resumeEvents: string[] = [];
+  for await (const event of resumed) resumeEvents.push(event.type);
+  assert.deepEqual(resumeEvents, ["done"]);
+});
+
+test("gives up after one nudge and reports the empty result instead of looping", async () => {
+  let prompts = 0;
+  class SilentSession implements PiSessionLike {
+    private listener?: (event: { type: string; [key: string]: unknown }) => void;
+    subscribe(listener: (event: { type: string; [key: string]: unknown }) => void): () => void { this.listener = listener; return () => { this.listener = undefined; }; }
+    async prompt(): Promise<void> { prompts++; this.listener?.({ type: "message_update", assistantMessageEvent: { type: "thinking_delta", delta: "..." } }); }
+    async abort(): Promise<void> {}
+    dispose(): void {}
+  }
+  const manager = new ExternalToolContinuationManager(async () => new SilentSession());
+  const events: Array<{ type: string; result?: { text: string } }> = [];
+  for await (const event of manager.start(request)) events.push(event as { type: string; result?: { text: string } });
+  assert.equal(prompts, 2, "initial prompt + exactly one nudge");
+  const done = events.find((event) => event.type === "done");
+  assert.ok(done, "stream still completes");
+  assert.equal(done!.result!.text, "");
+});

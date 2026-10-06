@@ -91,11 +91,28 @@ export class ExternalToolContinuationManager {
     });
     const abort = () => { run.aborted = true; for (const pending of run.pending.values()) pending.reject(new ContinuationError("Run aborted", "continuation_run")); void session.abort(); };
     signal?.addEventListener("abort", abort, { once: true });
-    void session.prompt(renderMessages(request.messages)).then(() => {
+    // Some models narrate their intent ("I'll use the tool...") in thinking and
+    // then end the turn without emitting the tool call or any answer. A silent
+    // empty success breaks the OpenAI tool protocol, so give the session one
+    // nudge to actually act before reporting the (still empty) result.
+    const NUDGE = "Your previous turn ended without calling a tool and without answering. If a tool is needed to answer, call it now. Otherwise answer the user's question directly.";
+    const onPromptSettled = (): void => {
       run.completed = true;
       push({ type: "done", result: { requestId: request.requestId, model: request.model, text: run.text, finishReason: "stop", ...(run.usage === undefined ? {} : { usage: run.usage }) } });
       push({ type: "close" });
-    }).catch((error: unknown) => { push({ type: "error", requestId: request.requestId, message: error instanceof Error ? error.message : String(error) }); push({ type: "close" }); });
+    };
+    const onPromptError = (error: unknown): void => { push({ type: "error", requestId: request.requestId, message: error instanceof Error ? error.message : String(error) }); push({ type: "close" }); };
+    const degenerate = (): boolean => !run.aborted && run.pending.size === 0 && run.text.trim() === "" && nudges < 1;
+    let nudges = 0;
+    const settle = (): void => {
+      if (degenerate()) {
+        nudges++;
+        void session.prompt(NUDGE).then(settle, onPromptError);
+        return;
+      }
+      onPromptSettled();
+    };
+    void session.prompt(renderMessages(request.messages)).then(settle, onPromptError);
     try {
       yield* this.consume(run);
     } finally {
